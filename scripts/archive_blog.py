@@ -7,6 +7,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 from slugify import slugify
+from markdownify import markdownify as md  # 新增：HTML 转 Markdown
 
 BLOG_URL = "https://baoyu.io/blog"
 ARCHIVE_DIR = Path("content")
@@ -62,7 +63,7 @@ def extract_article(url: str):
             break
     date = parse_date(date_str)
 
-    # 正文（适配 baoyu.io 常见结构）
+    # 正文容器
     article = (
         soup.select_one("article")
         or soup.select_one("div.prose")
@@ -70,10 +71,21 @@ def extract_article(url: str):
         or soup.select_one(".post-content")
         or soup.select_one(".markdown")
     )
+
     if article:
-        for bad in article.find_all(["script", "style", "nav", "footer", "aside", "header"]):
-            bad.decompose()
-        content = article.get_text(separator="\n\n", strip=True)
+        # 将所有图片转为绝对路径（保留图片）
+        for img in article.find_all("img", src=True):
+            src = img.get("src", "")
+            if src and not src.startswith(("http://", "https://")):
+                img["src"] = urljoin(url, src)
+
+        # HTML 转 Markdown（保留标题、列表、链接、图片、代码块等）
+        content = md(
+            str(article),
+            heading_style="ATX",      # # 标题
+            bullets="-",              # - 列表
+            code_language_callback=lambda _: "python"  # 代码块默认语言
+        )
     else:
         content = "（正文提取失败，请检查文章结构）"
 
@@ -104,7 +116,6 @@ def main():
             filepath = ARCHIVE_DIR / year / month / filename
             filepath.parent.mkdir(parents=True, exist_ok=True)
 
-            # 使用 json.dumps 安全处理标题（解决 f-string 问题）
             front_matter = f"""---
 title: {json.dumps(title)}
 date: {date}
